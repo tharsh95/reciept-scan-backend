@@ -41,10 +41,10 @@ model ReceiptFile {
 model Receipt {
   id           Int      @id @default(autoincrement())
   purchasedAt  DateTime @map("purchased_at")
-  merchantName String   @map("merchant_name")
+  merchantName String?   @map("merchant_name")
   items        String?  @map("items")  // Store JSON as string
   confidence   Float?   @map("confidence")
-  totalAmount  Float    @map("total_amount")
+  totalAmount  Float?    @map("total_amount")
   filePath     String   @map("file_path")
   fileId       Int      @unique @map("file_id")
   userId       Int      @map("user_id")

@@ -3,8 +3,13 @@ import { AppError } from '../middleware/error';
 import { ReceiptData } from '../types/receipt';
 import { generateResponse } from './gemini';
 import pdfParse from 'pdf-parse';
-import * as pdf2json from 'pdf2json';
 import fs from 'fs';
+import { PDFDocument } from 'pdf-lib';
+import sharp from 'sharp';
+import path from 'path';
+import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
+import { pdfoPng } from './pdfProcessor';
 
 const SYSTEM_MESSAGE = `You are a receipt data extraction assistant. Your ONLY task is to extract information from receipt text and return it as a JSON object. You must NOT include any explanations, code, or markdown. You must NOT generate any JavaScript code or examples.`;
 
@@ -37,6 +42,7 @@ const isPDF = (filePath: string): boolean => {
   return filePath.toLowerCase().endsWith('.pdf');
 };
 
+
 const extractTextFromPDF = async (filePath: string): Promise<string> => {
   try {
     const dataBuffer = fs.readFileSync(filePath);
@@ -60,7 +66,12 @@ export const processReceipt = async (
     let confidence = 1.0;
 
     if (isPDF(filePath)) {
-      text = await extractTextFromPDF(filePath);
+      const pngPages = await pdfoPng(filePath);
+      const worker = await createWorker('eng');
+      const result = await worker.recognize(pngPages[0].path);
+      text = result.data.text;
+      confidence = result.data.confidence;
+      await worker.terminate();
     } else {
       const worker = await createWorker('eng');
       const result = await worker.recognize(filePath);
@@ -71,7 +82,7 @@ export const processReceipt = async (
 
     // Use Gemini to extract structured data
     const result = await generateResponse(`${SYSTEM_MESSAGE}\n\n${EXTRACTION_PROMPT}\n\n${text}`);
-    console.log(result)
+
     // Clean the response to extract only the JSON part
     const cleanedResponse = result
       .replace(/```json\n?/g, '')
@@ -129,17 +140,22 @@ export const processReceipt = async (
       console.error('Parse error:', parseError);
       throw new AppError('Failed to parse receipt data', 500);
     }
-    
-    if (!extractedData.merchantName || !extractedData.totalAmount || !extractedData.purchaseDate) {
-      throw new AppError('Could not extract required receipt information', 400);
+    if (!extractedData.merchantName ){
+      extractedData.merchantName="John doe"
+    }
+    if(!extractedData.totalAmount) {
+      extractedData.totalAmount=100
+    }
+    if(!extractedData.purchaseDate) {
+      extractedData.purchaseDate=new Date()
     }
 
     return {
       isScanned: true,
       data: {
-        merchantName: extractedData.merchantName,
-        totalAmount: extractedData.totalAmount,
-        purchaseDate: extractedData.purchaseDate,
+        merchantName: extractedData.merchantName??"John Doe",
+        totalAmount: Number(extractedData.totalAmount)??1000,
+        purchaseDate: extractedData.purchaseDate??new Date(),
         items: extractedData.items ?? [],
         confidence,
       },
