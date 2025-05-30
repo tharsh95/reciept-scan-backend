@@ -32,22 +32,21 @@ A Node.js backend API for scanning, processing, and managing receipts using OCR 
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd receipt-scan
+git clone https://github.com/tharsh95/reciept-scan-backend.git
+cd receipt-scan-backend
 ```
 
 2. Install dependencies:
 ```bash
-cd backend
 npm install
 ```
 
 3. Set up environment variables:
 Create a `.env` file in the backend directory with the following variables:
 ```env
-DATABASE_URL="postgresql://user:password@localhost:5432/receipt_db"
-JWT_SECRET="your-jwt-secret"
-PORT=3001
+DATABASE_URL="file:./dev.db"
+JWT_SECRET="your-super-secret-key-here"
+GEMINI_API_KEY=""
 ```
 
 4. Initialize the database:
@@ -199,30 +198,12 @@ npm run dev
 }
 ```
 
-## Error Handling
-
-The API uses a standardized error response format:
-```json
-{
-  "error": {
-    "message": "string",
-    "statusCode": number,
-    "errors": [
-      {
-        "path": "string",
-        "message": "string"
-      }
-    ]
-  }
-}
-```
-
 ## File Management
 
 - Supported file types: PDF and images
 - Maximum file size: 5MB
 - Files are stored in the `uploads` directory
-- Automatic cleanup of orphaned files every 24 hours
+- Automatic cleanup of orphaned files every 24 hours(Removed)
 
 ## Security
 
