@@ -2,13 +2,8 @@ import { createWorker } from 'tesseract.js';
 import { AppError } from '../middleware/error';
 import { ReceiptData } from '../types/receipt';
 import { generateResponse } from './gemini';
-import pdfParse from 'pdf-parse';
 import fs from 'fs';
-import { PDFDocument } from 'pdf-lib';
-import sharp from 'sharp';
-import path from 'path';
-import os from 'os';
-import { v4 as uuidv4 } from 'uuid';
+
 import { pdfoPng } from './pdfProcessor';
 
 const SYSTEM_MESSAGE = `You are a receipt data extraction assistant. Your ONLY task is to extract information from receipt text and return it as a JSON object. You must NOT include any explanations, code, or markdown. You must NOT generate any JavaScript code or examples.`;
