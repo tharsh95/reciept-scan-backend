@@ -2,7 +2,7 @@ export interface ReceiptData {
   merchantName: string;
   totalAmount: number;
   purchaseDate: string;
-  items: ReceiptItem[];
+  items?: ReceiptItem[];
   confidence?: number;
   category?: string;
   notes?: string;

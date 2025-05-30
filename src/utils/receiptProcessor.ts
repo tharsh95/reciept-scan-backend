@@ -1,117 +1,152 @@
 import { createWorker } from 'tesseract.js';
 import { AppError } from '../middleware/error';
 import { ReceiptData } from '../types/receipt';
+import { generateResponse } from './gemini';
+import pdfParse from 'pdf-parse';
+import * as pdf2json from 'pdf2json';
+import fs from 'fs';
 
-export const processReceipt = async (filePath: string): Promise<{
+const SYSTEM_MESSAGE = `You are a receipt data extraction assistant. Your ONLY task is to extract information from receipt text and return it as a JSON object. You must NOT include any explanations, code, or markdown. You must NOT generate any JavaScript code or examples.`;
+
+const EXTRACTION_PROMPT = `Extract the following information from the receipt text and return it as a JSON object:
+
+{
+  "merchantName": "string or null",
+  "totalAmount": number or null,
+  "purchaseDate": "YYYY-MM-DD or null",
+  folioId":"string or null
+  "items": [
+    {
+      "name": "string",
+      "quantity": number,
+      "price": number
+    }
+  ]
+}
+
+Rules:
+1. Return ONLY the JSON object, no other text
+2. Use null for any field you cannot find
+3. For items, only include items that are explicitly listed
+4. For totalAmount, use the highest number that appears to be a total
+5. For purchaseDate, convert any date format to YYYY-MM-DD
+
+Receipt text:`;
+
+const isPDF = (filePath: string): boolean => {
+  return filePath.toLowerCase().endsWith('.pdf');
+};
+
+const extractTextFromPDF = async (filePath: string): Promise<string> => {
+  try {
+    const dataBuffer = fs.readFileSync(filePath);
+    const data = await pdfParse(dataBuffer);
+    return data.text;
+  } catch (error) {
+    console.error('Error extracting text from PDF:', error);
+    throw new AppError('Failed to extract text from PDF', 500);
+  }
+};
+
+export const processReceipt = async (
+  filePath: string
+): Promise<{
   isScanned: boolean;
   data: ReceiptData;
   confidence: number;
 }> => {
   try {
-    const worker = await createWorker();
-    await worker.loadLanguage('eng');
-    await worker.initialize('eng');
+    let text: string;
+    let confidence = 1.0;
 
-    const { data: { text, confidence } } = await worker.recognize(filePath);
-    await worker.terminate();
+    if (isPDF(filePath)) {
+      text = await extractTextFromPDF(filePath);
+    } else {
+      const worker = await createWorker('eng');
+      const result = await worker.recognize(filePath);
+      text = result.data.text;
+      confidence = result.data.confidence;
+      await worker.terminate();
+    }
 
-    // Extract receipt data using regex patterns
-    const merchantName = extractMerchantName(text);
-    const totalAmount = extractTotalAmount(text);
-    const purchaseDate = extractPurchaseDate(text);
-    const items = extractItems(text);
+    // Use Gemini to extract structured data
+    const result = await generateResponse(`${SYSTEM_MESSAGE}\n\n${EXTRACTION_PROMPT}\n\n${text}`);
+    console.log(result)
+    // Clean the response to extract only the JSON part
+    const cleanedResponse = result
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .replace(/^[^{]*/, '')  // Remove any text before the first {
+      .replace(/[^}]*$/, '')  // Remove any text after the last }
+      .replace(/```javascript[\s\S]*?```/g, '') // Remove any JavaScript code blocks
+      .replace(/const[\s\S]*?;/g, '') // Remove any JavaScript variable declarations
+      .replace(/function[\s\S]*?{[\s\S]*?}/g, '') // Remove any JavaScript functions
+      .replace(/javascript[\s\S]*?/g, '') // Remove any remaining JavaScript code
+      .replace(/To extract[\s\S]*?/g, '') // Remove any "To extract" explanations
+      .replace(/Example:[\s\S]*?/g, '') // Remove any examples
+      .replace(/Steps:[\s\S]*?/g, '') // Remove any steps
+      .trim();
 
-    if (!merchantName || !totalAmount || !purchaseDate) {
+    let extractedData;
+    try {
+      // Validate that the response looks like JSON before parsing
+      if (!cleanedResponse.startsWith('{') || !cleanedResponse.endsWith('}')) {
+        console.error('Invalid JSON structure:', cleanedResponse);
+        throw new Error('Response is not a valid JSON object');
+      }
+
+      extractedData = JSON.parse(cleanedResponse);
+
+      // Validate the structure of the parsed data
+      if (typeof extractedData !== 'object' || Array.isArray(extractedData)) {
+        throw new Error('Response is not a valid JSON object');
+      }
+
+      // Transform items from object to array format if needed
+      if (extractedData.items && typeof extractedData.items === 'object' && !Array.isArray(extractedData.items)) {
+        extractedData.items = Object.entries(extractedData.items).map(([name, details]: [string, any]) => ({
+          name,
+          quantity: details.quantity,
+          price: details.price
+        }));
+      }
+
+      // Fix typo in purchaseDate field if present
+      if (extractedData.purchasseeDate) {
+        extractedData.purchaseDate = extractedData.purchasseeDate;
+        delete extractedData.purchasseeDate;
+      }
+
+      // Validate that we're not using example values or code
+      if (typeof extractedData.merchantName === 'function' || 
+          typeof extractedData.totalAmount === 'function' ||
+          typeof extractedData.purchaseDate === 'function' ||
+          typeof extractedData.items === 'function') {
+        throw new Error('Response contains JavaScript code instead of data');
+      }
+    } catch (parseError) {
+      console.error('Failed to parse cleaned response:', cleanedResponse);
+      console.error('Parse error:', parseError);
+      throw new AppError('Failed to parse receipt data', 500);
+    }
+    
+    if (!extractedData.merchantName || !extractedData.totalAmount || !extractedData.purchaseDate) {
       throw new AppError('Could not extract required receipt information', 400);
     }
 
     return {
       isScanned: true,
       data: {
-        merchantName,
-        totalAmount,
-        purchaseDate,
-        items,
+        merchantName: extractedData.merchantName,
+        totalAmount: extractedData.totalAmount,
+        purchaseDate: extractedData.purchaseDate,
+        items: extractedData.items ?? [],
         confidence,
       },
       confidence,
     };
   } catch (error) {
+    console.error('Error processing receipt:', error);
     throw new AppError('Failed to process receipt', 500);
   }
 };
-
-const extractMerchantName = (text: string): string | null => {
-  // Look for common merchant name patterns
-  const patterns = [
-    /(?:^|\n)([A-Z][A-Z\s]+)(?:\n|$)/, // All caps words
-    /(?:^|\n)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\n|$)/, // Title case words
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return match[1].trim();
-    }
-  }
-
-  return null;
-};
-
-const extractTotalAmount = (text: string): number | null => {
-  // Look for total amount patterns
-  const patterns = [
-    /(?:total|amount|sum|balance)[:\s]+[$]?(\d+\.\d{2})/i,
-    /[$]?(\d+\.\d{2})(?:\s*(?:total|amount|sum|balance))?/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      return parseFloat(match[1]);
-    }
-  }
-
-  return null;
-};
-
-const extractPurchaseDate = (text: string): string | null => {
-  // Look for date patterns
-  const patterns = [
-    /(?:date|purchase date)[:\s]+(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i,
-    /(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      const date = new Date(match[1]);
-      if (!isNaN(date.getTime())) {
-        return date.toISOString();
-      }
-    }
-  }
-
-  return null;
-};
-
-const extractItems = (text: string): Array<{ name: string; quantity: number; price: number }> => {
-  const items: Array<{ name: string; quantity: number; price: number }> = [];
-  const lines = text.split('\n');
-
-  for (const line of lines) {
-    // Look for item patterns
-    const itemPattern = /(.+?)\s+(\d+)\s+[$]?(\d+\.\d{2})/;
-    const match = line.match(itemPattern);
-
-    if (match) {
-      items.push({
-        name: match[1].trim(),
-        quantity: parseInt(match[2]),
-        price: parseFloat(match[3]),
-      });
-    }
-  }
-
-  return items;
-}; 

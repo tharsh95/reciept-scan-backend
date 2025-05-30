@@ -51,6 +51,7 @@ export const validatePDF = async (filePath: string): Promise<boolean> => {
     
     return true;
   } catch (error) {
+    console.error('Error validating PDF:', error);
     return false;
   }
 }; 

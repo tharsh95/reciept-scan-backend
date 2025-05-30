@@ -8,7 +8,29 @@ const prisma = new PrismaClient();
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    console.log('Request headers:', req.headers);
+    console.log('Request body:', req.body);
+    console.log('Content-Type:', req.headers['content-type']);
+    
     const { name, email, password } = req.body;
+    console.log('Destructured values:', { name, email, password });
+
+    // Validate required fields
+    if (!name || !email || !password) {
+      console.log('Missing required fields:', { name, email, password });
+      throw new AppError('Name, email and password are required', 400);
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      throw new AppError('Invalid email format', 400);
+    }
+
+    // Validate password strength
+    if (password.length < 6) {
+      throw new AppError('Password must be at least 6 characters long', 400);
+    }
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({

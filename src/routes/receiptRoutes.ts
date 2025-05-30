@@ -6,7 +6,10 @@ import {
   getReceipts, 
   getReceipt, 
   downloadReceipt, 
-  deleteReceipt 
+  deleteReceipt, 
+  getStats,
+  validateReceipt,
+  processReceipt
 } from '../controllers/receiptController';
 import { authenticateToken } from '../middleware/auth';
 
@@ -25,14 +28,14 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage,
-  fileFilter: (req, file, cb) => {
-    // Accept only PDF files
-    if (file.mimetype === 'application/pdf') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF files are allowed'));
-    }
-  }
+  // fileFilter: (req, file, cb) => {
+  //   // Accept only PDF files
+  //   if (file.mimetype === 'application/pdf') {
+  //     cb(null, true);
+  //   } else {
+  //     cb(new Error('Only PDF files are allowed'));
+  //   }
+  // }
 });
 
 // All routes are protected
@@ -40,10 +43,12 @@ router.use(authenticateToken);
 
 // Receipt routes
 router.post('/upload', upload.single('file'), uploadReceipt);
+router.post('/:fileId/validate', validateReceipt);
+router.post('/:fileId/process', processReceipt);
 router.get('/', getReceipts);
+router.get('/stats', getStats);
 router.get('/:id', getReceipt);
 router.get('/:id/download', downloadReceipt);
 router.delete('/:id', deleteReceipt);
-
 export default router; 
- 
+  
