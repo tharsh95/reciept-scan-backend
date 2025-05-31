@@ -123,6 +123,30 @@ export const validateReceipt = async (req: Request, res: Response, next: NextFun
   }
 };
 
+const cleanupProcessedFiles = async (filePath: string) => {
+  try {
+    await fs.unlink(filePath);
+    console.log(`Deleted processed file: ${filePath}`);
+
+    const outputDir = path.join(__dirname, '../../output/folder');
+    try {
+      const outputFiles = await fs.readdir(outputDir);
+      for (const file of outputFiles) {
+        await fs.unlink(path.join(outputDir, file));
+        console.log(`Deleted output file: ${path.join(outputDir, file)}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        console.log('Output directory does not exist, skipping cleanup');
+      } else {
+        console.error('Error cleaning output directory:', error);
+      }
+    }
+  } catch (error) {
+    console.error(`Error deleting processed file ${filePath}:`, error);
+  }
+};
+
 export const processReceipt = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.userId;
@@ -166,16 +190,19 @@ export const processReceipt = async (req: Request, res: Response, next: NextFunc
         existingReceipt.purchasedAt.toISOString().split('T')[0] === processedReceipt.data.purchaseDate;
       
       if (isDuplicate) {
-        // Delete the file even if it's a duplicate
-        try {
-          await fs.unlink(receiptFile.filePath);
-          console.log(`Deleted duplicate file: ${receiptFile.filePath}`);
-        } catch (error) {
-          console.error(`Error deleting duplicate file ${receiptFile.filePath}:`, error);
-        }
+        // Delete the duplicate receipt file
+        await prisma.receiptFile.delete({
+          where: {
+            id: receiptFile.id
+          }
+        });
+
+        // Delete the file from filesystem
+        await cleanupProcessedFiles(receiptFile.filePath);
 
         return res.status(200).json({
-          message: 'Duplicate receipt detected',
+          message: 'Duplicate receipt detected and removed',
+          status:false,
           receipt: {
             id: existingReceipt.id,
             merchantName: existingReceipt.merchantName,
@@ -189,7 +216,6 @@ export const processReceipt = async (req: Request, res: Response, next: NextFunc
       }
     }
 
-    // Create receipt record with processed data
     const receipt = await prisma.receipt.create({
       data: {
         merchantName: processedReceipt.data.merchantName,
@@ -203,7 +229,6 @@ export const processReceipt = async (req: Request, res: Response, next: NextFunc
       },
     });
 
-    // Update receipt file as processed
     await prisma.receiptFile.update({
       where: {
         id: parseInt(fileId)
@@ -213,30 +238,7 @@ export const processReceipt = async (req: Request, res: Response, next: NextFunc
       }
     });
 
-    // Delete the file after successful processing
-    try {
-      await fs.unlink(receiptFile.filePath);
-      console.log(`Deleted processed file: ${receiptFile.filePath}`);
-
-      // Clean output folder
-      const outputDir = path.join(__dirname, '../../output/folder');
-      try {
-        const outputFiles = await fs.readdir(outputDir);
-        for (const file of outputFiles) {
-          const filePath = path.join(outputDir, file);
-          await fs.unlink(filePath);
-          console.log(`Deleted output file: ${filePath}`);
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          console.log('Output directory does not exist, skipping cleanup');
-        } else {
-          console.error('Error cleaning output directory:', error);
-        }
-      }
-    } catch (error) {
-      console.error(`Error deleting processed file ${receiptFile.filePath}:`, error);
-    }
+    await cleanupProcessedFiles(receiptFile.filePath);
 
     res.status(201).json({
       message: 'Receipt processed successfully',
@@ -253,6 +255,13 @@ export const processReceipt = async (req: Request, res: Response, next: NextFunc
   } catch (error) {
     next(error);
   }
+};
+
+const getReceiptStatus = (file: any) => {
+  if (!file.isValid && !file.isProcessed) return 'pending_validation';
+  if (file.isValid && !file.isProcessed) return 'pending_processing';
+  if (file.isValid && file.isProcessed && !file.receipt) return 'processed';
+  return 'final';
 };
 
 export const getReceipts = async (req: Request, res: Response, next: NextFunction) => {
@@ -334,10 +343,7 @@ export const getReceipts = async (req: Request, res: Response, next: NextFunctio
       status: {
         isValid: file.isValid,
         isProcessed: file.isProcessed,
-        currentStage: !file.isValid&&!file.isProcessed ? 'pending_validation' :
-                     file.isValid && !file.isProcessed ? 'pending_processing' :
-                     file.isValid && file.isProcessed && !file.receipt ? 'processed' :
-                     'final'
+        currentStage: getReceiptStatus(file)
       },
       receipt: file.receipt ? {
         ...file.receipt,
@@ -372,108 +378,47 @@ export const getReceipts = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-export const getReceipt = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = req.user?.userId;
-    const { id } = req.params;
-
-    const receipt = await prisma.receipt.findFirst({
-      where: {
-        id: parseInt(id),
-        userId,
-      },
-      include: {
-        file: {
-          select: {
-            fileName: true,
-            filePath: true,
-            isProcessed: true,
-          },
-        },
-      },
-    });
-
-    if (!receipt) {
-      throw new AppError('Receipt not found', 404);
-    }
-
-    res.json({ receipt });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const downloadReceipt = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = req.user?.userId;
-    const { id } = req.params;
-
-    const receipt = await prisma.receipt.findFirst({
-      where: {
-        id: parseInt(id),
-        userId,
-      },
-      include: {
-        file: true,
-      },
-    });
-
-    if (!receipt) {
-      throw new AppError('Receipt not found', 404);
-    }
-
-    const filePath = receipt.file.filePath;
-    
-    // Check if file exists
-    try {
-      await fs.access(filePath);
-    } catch {
-      throw new AppError('File not found', 404);
-    }
-
-    res.download(filePath, receipt.file.fileName);
-  } catch (error) {
-    next(error);
-  }
-};
 
 export const deleteReceipt = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.user?.userId;
     const { id } = req.params;
 
-    const receipt = await prisma.receipt.findFirst({
+    const receiptFile = await prisma.receiptFile.findFirst({
       where: {
         id: parseInt(id),
         userId,
       },
       include: {
-        file: true,
-      },
+        receipt: true
+      }
     });
 
-    if (!receipt) {
-      throw new AppError('Receipt not found', 404);
+    if (!receiptFile) {
+      throw new AppError('Receipt file not found', 404);
     }
 
     // Delete file from filesystem
     try {
-      await fs.unlink(receipt.file.filePath);
+      await fs.unlink(receiptFile.filePath);
     } catch (error) {
       console.error('Error deleting file:', error);
     }
 
-    // Delete from database
-    await prisma.receipt.delete({
-      where: {
-        id: parseInt(id),
-      },
-    });
+    // Delete associated receipt if it exists
+    if (receiptFile.receipt) {
+      await prisma.receipt.delete({
+        where: {
+          id: receiptFile.receipt.id
+        }
+      });
+    }
 
+    // Delete the receipt file
     await prisma.receiptFile.delete({
       where: {
-        id: receipt.file.id,
-      },
+        id: receiptFile.id
+      }
     });
 
     res.json({ message: 'Receipt deleted successfully' });
@@ -516,7 +461,7 @@ export const getStats = async(req:Request,res:Response,next:NextFunction)=>{
     });
 
     // Calculate total spent
-    const totalSpent = receipts.reduce((sum, receipt) => sum + receipt.totalAmount, 0);
+    const totalSpent = receipts.reduce((sum, receipt) => sum + (receipt.totalAmount ?? 0), 0);
 
     // Calculate average amount
     const averageAmount = receipts.length > 0 ? totalSpent / receipts.length : 0;
@@ -524,7 +469,7 @@ export const getStats = async(req:Request,res:Response,next:NextFunction)=>{
     // Calculate monthly breakdown
     const monthlyBreakdown = receipts.reduce((acc, receipt) => {
       const month = receipt.purchasedAt.toISOString().slice(0, 7); // YYYY-MM format
-      acc[month] = (acc[month] || 0) + receipt.totalAmount;
+      acc[month] = (acc[month] || 0) + (receipt.totalAmount ?? 0);
       return acc;
     }, {} as Record<string, number>);
 
@@ -533,8 +478,8 @@ export const getStats = async(req:Request,res:Response,next:NextFunction)=>{
       if (receipt.items) {
         const items = JSON.parse(receipt.items);
         items.forEach((item: any) => {
-          const category = item.category || 'Uncategorized';
-          acc[category] = (acc[category] || 0) + (item.price || 0);
+          const category = item.category ?? 'Uncategorized';
+          acc[category] = (acc[category] || 0) + (item.price ?? 0);
         });
       }
       return acc;
