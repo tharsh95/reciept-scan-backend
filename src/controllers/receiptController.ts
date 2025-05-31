@@ -190,7 +190,6 @@ export const processReceipt = async (req: Request, res: Response, next: NextFunc
         existingReceipt.purchasedAt.toISOString().split('T')[0] === processedReceipt.data.purchaseDate;
       
       if (isDuplicate) {
-<<<<<<< HEAD
         // Delete the duplicate receipt file
         await prisma.receiptFile.delete({
           where: {
@@ -201,9 +200,7 @@ export const processReceipt = async (req: Request, res: Response, next: NextFunc
         // Delete the file from filesystem
         await cleanupProcessedFiles(receiptFile.filePath);
 
-=======
         await cleanupProcessedFiles(receiptFile.filePath);
->>>>>>> a386519af2860811c4ad7ad1eb8b9012ea35cbc2
         return res.status(200).json({
           message: 'Duplicate receipt detected and removed',
           status:false,
