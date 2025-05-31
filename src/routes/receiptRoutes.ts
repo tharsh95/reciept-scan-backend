@@ -47,8 +47,6 @@ router.post('/:fileId/validate', validateReceipt);
 router.post('/:fileId/process', processReceipt);
 router.get('/', getReceipts);
 router.get('/stats', getStats);
-router.get('/:id', getReceipt);
-router.get('/:id/download', downloadReceipt);
 router.delete('/:id', deleteReceipt);
 export default router; 
   
