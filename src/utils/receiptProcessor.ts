@@ -38,16 +38,16 @@ const isPDF = (filePath: string): boolean => {
 };
 
 
-const extractTextFromPDF = async (filePath: string): Promise<string> => {
-  try {
-    const dataBuffer = fs.readFileSync(filePath);
-    const data = await pdfParse(dataBuffer);
-    return data.text;
-  } catch (error) {
-    console.error('Error extracting text from PDF:', error);
-    throw new AppError('Failed to extract text from PDF', 500);
-  }
-};
+// const extractTextFromPDF = async (filePath: string): Promise<string> => {
+//   try {
+//     const dataBuffer = fs.readFileSync(filePath);
+//     const data = await pdfParse(dataBuffer);
+//     return data.text;
+//   } catch (error) {
+//     console.error('Error extracting text from PDF:', error);
+//     throw new AppError('Failed to extract text from PDF', 500);
+//   }
+// };
 
 export const processReceipt = async (
   filePath: string

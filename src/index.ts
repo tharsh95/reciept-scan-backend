@@ -5,7 +5,6 @@ import { PrismaClient } from '@prisma/client';
 import { errorHandler } from './middleware/error';
 import userRoutes from './routes/userRoutes';
 import receiptRoutes from './routes/receiptRoutes';
-import { FileCleanupService } from './services/fileCleanup.service';
 import path from 'path';
 import fs from 'fs';
 
