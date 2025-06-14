@@ -17,7 +17,7 @@ export const validate = (schema: AnyZodObject) => {
           path: err.path.join('.'),
           message: err.message,
         }));
-        next(new AppError('Validation failed', 400, errors));
+        next(new AppError(`Validation failed: ${JSON.stringify(errors)}`, 400));
       } else {
         next(error);
       }
