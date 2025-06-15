@@ -34,7 +34,9 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-
+app.get("/", (req, res) => {
+  res.send("Server is running ✅");
+});
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/receipts', receiptRoutes);
