@@ -34,6 +34,9 @@ app.use(express_1.default.json({ limit: '50mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
 // Static files
 app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
+app.get("/", (req, res) => {
+    res.send("Server is running ✅");
+});
 // Routes
 app.use('/api/users', userRoutes_1.default);
 app.use('/api/receipts', receiptRoutes_1.default);
